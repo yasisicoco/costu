@@ -1,0 +1,13 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.log
+*.tsbuildinfo
+AGENT.md
+AGENTS.md
