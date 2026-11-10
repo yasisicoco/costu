@@ -64,5 +64,6 @@ Cloud에 사전 설치된 Chromium을 사용할 때는 `PLAYWRIGHT_CHROMIUM_EXEC
 - [기술 및 데이터 설계](docs/ARCHITECTURE.md)
 - [개발 작업과 검증 체크리스트](docs/BACKLOG.md)
 - [Codex Cloud 인계](docs/CLOUD_HANDOFF.md)
+- [실제 휴대폰 테스트 배포 검토안](docs/PILOT.md)
 
 소스 저장소는 [yasisicoco/costu](https://github.com/yasisicoco/costu)이며 사용자가 승인한 개인 공개 저장소다. 이후 개발은 Codex Cloud에서 진행하는 방침이다. Cloud 환경의 실행·검증 상태는 `docs/CLOUD_HANDOFF.md`에서 관리한다. 소스 공개와 실제 서비스 배포는 별개다. AGENT.md와 AGENTS.md는 커밋·푸시 대상에서 제외한다.

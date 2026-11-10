@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: costu-pilot
+    runtime: node
+    plan: free
+    region: singapore
+    repo: https://github.com/yasisicoco/costu
+    branch: feat/study-plan-and-focus-flow
+    autoDeployTrigger: 'off'
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.19.0

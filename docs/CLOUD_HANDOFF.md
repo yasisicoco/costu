@@ -33,6 +33,12 @@
 
 단위·서버 테스트 17개, 브라우저 29개 통과(전체 28개 후 신규 오프라인 시나리오를 포함한 할 일 테스트 9개 재검증). 타입 검사·빌드·audit·diff 검사 통과. 320/390px 할 일 목록과 진행 중 타이머 스크린샷을 확인했고 디자이너도 배치를 검토했다. 신규 출력은 `test-results/mobile-study-plan.png`, `mobile-study-plan-320.png`, `mobile-active-plan.png`다. 실제 휴대폰 공유 시트는 아직 실기기 검증 전이며, 브라우저 테스트에서는 성공·취소·실패를 주입해 검증했다.
 
+### 소스 전달 및 다음 승인 지점
+
+기능 구현 커밋 `1d6d8f8`을 개발 브랜치로 푸시했고 [초안 PR #1](https://github.com/yasisicoco/costu/pull/1)을 생성했다. CLI의 GitHub API 호출은 환경 정책에서 Forbidden이었지만 연결된 GitHub 도구로 PR 생성을 완료했다. 실제 서비스는 배포하지 않았다.
+
+실기기 검증을 위한 검토용 `deploy/render.preview.yaml`과 `docs/PILOT.md`를 준비했다. PORT=3099에서 프로덕션 HTML·health·WebSocket 흐름을 확인했다. 추천은 결제수단·무료 한도를 확인한 Render Free의 짧은 친구 테스트이며 앱 URL 자체는 공개된다. 기존 개인 서버 또는 Cloud 내부 개발을 대안으로 둔다. 공개 범위·계정 결제 조건에 대한 사용자 승인 전에는 설정을 적용하거나 서비스를 생성하지 않는다.
+
 ### 이 환경의 재현 명령
 
 ```sh
