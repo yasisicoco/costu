@@ -9,10 +9,14 @@
     "start": "tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "npm run build && playwright test",
-    "check": "npm run test && npm run build"
+    "check": "npm run test && npm run build",
+    "predev": "node scripts/prepare-face-models.mjs",
+    "prebuild": "node scripts/prepare-face-models.mjs",
+    "postinstall": "node scripts/prepare-face-models.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",
+    "@vladmandic/human": "3.3.6",
     "express": "^5.1.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

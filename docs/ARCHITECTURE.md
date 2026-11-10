@@ -39,6 +39,16 @@ React 화면
 
 서재 초대는 Web Share API가 있으면 사용자의 버튼 클릭으로 공유 시트를 열고, 미지원·실패 시 링크 복사로 전환한다. 사용자가 공유를 취소하면 조용히 종료한다. 링크 복사도 별도 버튼으로 제공한다. 기록·설정 화면의 진행 중 타이머 패널은 남은 시간과 상태만 표시하며 집중 공간으로 복귀할 수 있다.
 
+## 선택형 카메라 아바타
+
+버튼을 누른 경우에만 getUserMedia(video, audio=false)를 호출한다. 영상은 보이지 않는 로컬 video와 메모리 내부 추적에만 사용한다. Human 3.3.6의 BlazeFace/FaceMesh만 사용하고 감정·나이·성별·얼굴 식별·기타 분석 모델은 비활성화한다. 원본 영상·사진·전체 기하점은 서버·localStorage·sessionStorage·백업에 저장하지 않는다.
+
+클라이언트는 기하점에서 yaw/pitch/roll(-1..1), leftEye/rightEye/mouth/smile(0..1)만 계산한다. 이 값은 표정 모양을 그리기 위한 값이며 감정·학습 여부·집중도 판정이 아니다. 로컬 추적은 저해상도 영상으로 순차 수행하며 중첩 추론하지 않는다. 같은 방의 친구에게는 최대 약 4회/초로 최신 수치만 전송한다. 타이머나 공부 상태는 자동 변경하지 않는다.
+
+꺼짐·권한 거부·탭 숨김·pagehide·장치 종료·해제 때 모든 카메라 트랙과 영상 연결을 해제하고 아바타를 중립으로 되돌린다. 취소 후 늦게 온 스트림도 즉시 종료하며, 재시작은 이전 추적기의 정리 뒤 직렬로 초기화한다. 상대 동작은 클라이언트 메모리에만 두고 1.5초 이상 갱신되지 않거나 참가자가 단절/퇴장하면 중립으로 표시한다.
+
+모델 4개 파일은 설치한 패키지에서 npm ci/dev/build 때 생성하고 앱과 같은 Origin에서 제공한다. 대형 추론 코드와 모델은 기본 오프라인 셸에서 제외하고, 선택형 연결 후 같은 배포의 오프라인 캐시에 넣는다. 카메라 사용 여부는 저장하지 않으므로 새로고침하면 다시 꺼져 있다. 라이선스·출처는 THIRD_PARTY.md를 따른다.
+
 ## 실시간 이벤트
 
 | 방향 | 이벤트 | 입력/결과 |
@@ -48,6 +58,8 @@ React 화면
 | client → server | room:join | name, avatar, code → Reply |
 | client → server | room:leave | 현재 socket의 방 퇴장 |
 | client → server | presence:update | ready / focusing / away |
+| client → server | avatar:motion | 정규화한 숫자 7개 또는 null |
+| server → room | avatar:motion | 서버가 지정한 memberId, motion; 보낸 사람 제외 |
 | client → server | reaction | 👏 / 🌱 / 🔥 / ☕ |
 | server → room | room:update | 방 스냅샷 |
 | server → room | reaction | memberId, emoji, at |
@@ -65,7 +77,8 @@ React 화면
 - 방 1,000개, 방당 6명의 앱 수준 한도를 둔다. 이는 부하 검증된 수용량이 아니다.
 - 브라우저 Origin은 요청 Host 또는 명시한 ALLOWED_ORIGINS와 일치해야 한다.
 - 방 코드는 약 40-bit 공간이며 초대 권한과 비슷한 비밀값으로 취급한다. 외부 공개·검색 노출을 피한다.
-- 카메라·마이크 권한은 Permissions-Policy에서도 차단한다. 현재 앱은 이를 요청하지 않는다.
+- Permissions-Policy는 camera=(self), microphone=()로 같은 Origin의 선택형 촬영만 허용하고 마이크는 차단한다.
+- avatar:motion은 엄격한 필드·유한한 숫자 범위만 받아 같은 방의 다른 socket에 전달한다. 별도 초당 8회 한도(일반 7개와 중립 null 슬롯 1개)를 두고 서버 상태에 저장하지 않는다. 기존 상태·응원 제한과 분리한다.
 - 사용자 입력은 React 텍스트로 렌더링하며 HTML 삽입을 사용하지 않는다.
 - 외부 영상·음성·분석·광고·폰트 요청은 없다. 패키지 설치 시 레지스트리 연결은 개발 환경의 동작이다.
 - 개인 기록은 서버에 업로드하지 않는다. 네트워크에서 서버가 IP를 볼 수 있다는 사실까지 사라지는 것은 아니다.
@@ -78,7 +91,7 @@ React 화면
 1. 같은 서버에서 비공개 소규모 검증.
 2. 계정 및 DB에 세션 저장, 서버에서 소유권·idempotency 검증.
 3. Redis adapter 등과 방 상태의 공유 저장 설계 후 다중 인스턴스 지원.
-4. 실기기 배터리·발열·권한·OS 복귀 검증 후 기기 내 카메라 PoC.
+4. 선택형 카메라 아바타의 실기기 배터리·발열·권한·OS 복귀·인식률 검증.
 5. 실제 수요가 확인되면 관리형 WebRTC/SFU 음성.
 
 브라우저 백그라운드 타이머 제약: [MDN Page Visibility API](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API). 실시간 연결 단절은 정상적으로 발생할 수 있다는 전제: [Socket.IO Handling disconnections](https://socket.io/docs/v4/tutorial/handling-disconnections).

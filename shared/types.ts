@@ -1,4 +1,5 @@
 export type Avatar = 'cat' | 'bunny' | 'bear' | 'frog';
+export type AvatarMotion = { yaw: number; pitch: number; roll: number; leftEye: number; rightEye: number; mouth: number; smile: number };
 export type Presence = 'ready' | 'focusing' | 'away';
 export type Profile = { name: string; avatar: Avatar; goal: number };
 export type Member = { id: string; name: string; avatar: Avatar; status: Presence; online?: boolean };

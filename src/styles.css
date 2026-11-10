@@ -183,3 +183,41 @@ input:focus-visible{outline:2px solid #52683f;outline-offset:2px}
 .ongoing-focus small{font-size:12px;line-height:1.8;color:#56634b}
 .ongoing-focus>.secondary{font-size:14px;min-height:44px;white-space:normal;line-height:1.8;max-width:100%;flex-shrink:0}
 @media(max-width:640px){.ongoing-focus{padding:14px;gap:10px}.ongoing-focus>div{flex-basis:160px}.ongoing-focus>.secondary{padding:10px 12px}}
+
+.camera-avatar-panel{padding:24px;margin-top:24px;overflow:hidden}
+.camera-avatar-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.camera-avatar-heading h2{display:flex;align-items:center;gap:8px;font-size:18px;font-weight:600;color:#465a35}
+.camera-avatar-heading p{margin-top:8px;font-size:14px;line-height:1.8;color:#56634b}
+.camera-avatar-badge{display:inline-flex;align-items:center;gap:7px;padding:8px 10px;border-radius:8px;background:#f1f4eb;color:#465a35;font-size:12px;line-height:1.6;white-space:nowrap}
+.camera-avatar-badge>span{width:7px;height:7px;flex-shrink:0;background:#78866c;border-radius:50%}
+.camera-avatar-tracking .camera-avatar-badge{background:#e9f0df}
+.camera-avatar-tracking .camera-avatar-badge>span{background:#52683f}
+.camera-avatar-searching .camera-avatar-badge,.camera-avatar-error .camera-avatar-badge{color:#795321;background:#f8f1df}
+.camera-avatar-searching .camera-avatar-badge>span,.camera-avatar-error .camera-avatar-badge>span{background:#99733b}
+.camera-avatar-content{display:grid;grid-template-columns:minmax(0,240px) minmax(0,1fr);align-items:center;gap:28px;margin-top:24px}
+.camera-avatar-preview{min-width:0;text-align:center}
+.camera-avatar-preview-circle{width:100%;max-width:240px;aspect-ratio:1;margin:auto;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 42%,#f8faf3,#edf2e4);border:1px solid #e0e8d5;border-radius:50%;overflow:hidden}
+.camera-avatar-preview-circle>svg{width:92%;height:92%;max-width:220px;max-height:220px}
+.camera-avatar-preview>p{margin-top:15px;font-size:12px;line-height:1.8;color:#56634b}
+.camera-avatar-controls{min-width:0}
+.camera-avatar-description{font-size:14px;line-height:1.9;color:#465a35}
+.camera-avatar-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.camera-avatar-actions>button{min-height:48px;max-width:100%;font-size:14px;line-height:1.8;padding:12px 16px}
+.camera-avatar-error{margin-top:14px;padding:12px 14px;border-radius:8px;background:#faf1e9;font-size:14px;line-height:1.8;color:#794c35;overflow-wrap:anywhere}
+.camera-avatar-privacy{display:flex;align-items:flex-start;gap:10px;margin-top:22px;padding:15px;border:1px solid #e1e7d8;border-radius:10px;background:#f5f7ef;color:#465a35}
+.camera-avatar-privacy>svg{margin-top:3px}
+.camera-avatar-privacy>div{min-width:0}
+.camera-avatar-privacy strong{font-size:14px;line-height:1.8;font-weight:600}
+.camera-avatar-privacy p{font-size:12px;line-height:1.9;margin-top:5px;color:#56634b}
+.camera-avatar-footnote{font-size:12px;line-height:1.8;color:#56634b;margin-top:12px}
+@media(max-width:640px){
+  .camera-avatar-panel{padding:20px 14px;margin-top:20px}
+  .camera-avatar-heading{gap:12px}
+  .camera-avatar-heading h2{font-size:18px}
+  .camera-avatar-content{grid-template-columns:minmax(0,1fr);gap:22px;margin-top:22px}
+  .camera-avatar-preview-circle{max-width:216px}
+  .camera-avatar-preview>p{font-size:12px}
+  .camera-avatar-actions>button{width:100%;min-height:48px;justify-content:center}
+  .camera-avatar-privacy{padding:13px;gap:8px;margin-top:18px}
+  .camera-avatar-privacy p{font-size:12px}
+}

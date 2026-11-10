@@ -3,18 +3,21 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { Server } from 'socket.io';
 import { z } from 'zod';
-import type { Member, Room } from '../shared/types';
+import type { AvatarMotion, Member, Room } from '../shared/types';
 
 const profileSchema = z.object({ name: z.string().trim().min(1).max(16), avatar: z.enum(['cat', 'bunny', 'bear', 'frog']) });
 const joinSchema = profileSchema.extend({ code: z.string().regex(/^[A-Z2-9]{8}$/) });
 const createSchema = profileSchema.extend({ roomName: z.string().trim().min(1).max(32) });
 const statusSchema = z.enum(['ready', 'focusing', 'away']);
 const reactions = z.enum(['👏', '🌱', '🔥', '☕']);
+const headAxis = z.number().finite().min(-1).max(1);
+const expression = z.number().finite().min(0).max(1);
+const motionSchema: z.ZodType<AvatarMotion | null> = z.object({ yaw: headAxis, pitch: headAxis, roll: headAxis, leftEye: expression, rightEye: expression, mouth: expression, smile: expression }).strict().nullable();
 
 export function createApp({ disconnectGraceMs = 30000 } = {}) {
   const app = express();
   app.disable('x-powered-by');
-  app.use((_req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin'); res.setHeader('Permissions-Policy', 'camera=(), microphone=()'); next(); });
+  app.use((_req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin'); res.setHeader('Permissions-Policy', 'camera=(self), microphone=()'); next(); });
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     maxHttpBufferSize: 4096,
@@ -73,6 +76,7 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
       if (Date.now() - windowStart > 10000) { windowStart = Date.now(); count = 0; }
       return ++count <= 30;
     };
+    let motionTimes: number[] = [];
     socket.on('room:create', (input, callback) => {
       if (typeof callback !== 'function') return;
       if (!allowed()) return callback({ ok: false, error: '잠시 후 다시 시도해 주세요.' });
@@ -115,6 +119,16 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
       const parsed = reactions.safeParse(input);
       const code = memberships.get(socket.id);
       if (parsed.success && code) io.to(code).emit('reaction', { memberId: socket.id, emoji: parsed.data, at: Date.now() });
+    });
+    socket.on('avatar:motion', input => {
+      const code = memberships.get(socket.id);
+      if (!code) return;
+      const now = performance.now();
+      motionTimes = motionTimes.filter(at => now - at < 1000);
+      if (motionTimes.length >= (input === null ? 8 : 7)) return;
+      motionTimes.push(now);
+      const parsed = motionSchema.safeParse(input);
+      if (parsed.success) socket.to(code).emit('avatar:motion', { memberId: socket.id, motion: parsed.data });
     });
     socket.on('room:leave', () => leave(socket.id));
     socket.on('disconnect', () => {
