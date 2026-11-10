@@ -1,6 +1,25 @@
-# 실제 휴대폰 테스트 배포 제안
+# 실제 휴대폰 테스트 배포 기록
 
-상태: 기능 화면 확인 후 사용자가 다음 단계의 Render 무료 테스트 배포 진행을 승인했다. Render 연결은 확인했다. 배포 대상 워크스페이스 확인과 계정의 결제수단 유무 응답을 기다리는 중이며, 결제 조건·무료 한도 확인 전에는 서비스를 생성하지 않는다. 서비스 생성·외부 배포는 아직 수행하지 않았다.
+상태: 사용자가 `My Workspace` 사용과 계정에 결제수단이 없음을 확인해 Render Free Web Service를 생성했다. Render 배포 상태는 `live`이고 런타임 시작 로그를 확인했다. 외부 HTTPS·health·Socket.IO와 실제 휴대폰 동작은 Cloud 네트워크 제약으로 아직 검증하지 않았다.
+
+## 현재 Render 실행 상태
+
+| 항목 | 확인한 값·상태 |
+|---|---|
+| 워크스페이스 | 사용자가 지정한 `My Workspace` |
+| 결제수단 | 사용자가 계정에 결제수단이 없다고 확인. 연동 도구로 청구 설정을 직접 조회한 결과는 아님 |
+| 서비스 | `srv-dbpjco3ncjis7392kn3g` |
+| 서비스 URL | [https://costu-pilot.onrender.com](https://costu-pilot.onrender.com) — 서비스에 할당된 주소이며 현재 응답 성공은 미확인 |
+| 배포 | `dep-dbpjcp3ncjis7392kphg` — `live`, 완료 2026-11-11 00:21:59 KST (`finishedAt: 2026-11-10T15:21:59.381356Z`) |
+| 빌드 소스 | `ae47b9ee4b66cbe23faa6a2c8d3dc7b6bc3d1974` |
+| 실행 구성 | 서비스 재조회로 Free·싱가포르·인스턴스 1개·자동 배포 끔 확인 |
+| 런타임 로그 | `npm start` 성공, 포트 10000 listen, `Your service is live` 확인. 2026-11-11 00:21:50–00:22:36 KST 조회 구간의 앱 오류 로그 0건 |
+| 생성 방식 | 연결된 Render MCP 도구로 서비스 직접 생성. Blueprint를 배포한 것은 아님 |
+| 플랫폼 health check | 생성 도구가 HTTP `healthCheckPath` 설정을 제공하지 않아 기본 TCP 확인 사용 |
+| 앱 health 확인 | `/api/health`를 별도로 요청해 확인할 예정. 아직 외부 검증 성공 없음 |
+| 현재 접근 제약 | curl `CONNECT 403`, Playwright `ERR_TUNNEL_CONNECTION_FAILED`, 웹 조회도 접근 불가. 외부 앱 검증 성공으로 간주하지 않음 |
+
+다음 확인은 앱 HTML·`/api/health` 응답과 실제 Socket.IO 방 생성·입장·퇴장이다. 현재 Cloud 환경 네트워크 허용 목록에 `costu-pilot.onrender.com` 단일 도메인 추가가 필요하지만 이 채팅에는 설정 변경 도구가 없어 적용하지 못했다. 플랫폼의 live 상태와 외부 앱 검증은 구분한다. 자동 배포가 꺼져 있으므로 문서 후속 커밋은 위 배포 SHA를 바꾸지 않는다.
 
 ## 현재 스냅샷
 
@@ -18,27 +37,27 @@ GitHub 초안 PR #1의 개발 브랜치 `feat/study-plan-and-focus-flow`에 기�
 
 ## 비용과 서비스 한계
 
-[Render 무료 서비스 문서](https://render.com/docs/free)를 2026-11-10에 확인했다. 무료 인스턴스라도 기존 결제수단이 있으면 대역폭·빌드 한도 초과 시 과금될 수 있다. 따라서 계정 결제수단·사용량을 먼저 확인하고, 결제수단 없이 무료 한도에서 중단되는 조건을 확인할 수 있을 때만 진행한다. 기존 결제 설정을 임의로 바꾸지 않는다. 비용 0원을 보장할 수 없는 계정이면 배포 전에 추가 판단을 받는다.
+[Render 무료 서비스 문서](https://render.com/docs/free)를 2026-11-10에 확인했다. 무료 인스턴스라도 기존 결제수단이 있으면 대역폭·빌드 한도 초과 시 과금될 수 있다. 이번 생성 전에는 사용자가 `My Workspace` 사용과 계정에 결제수단이 없음을 명시적으로 확인했다. 연동 도구는 결제수단·청구 설정을 직접 조회하지 못하므로 사용자 확인과 플랫폼 조회 결과를 구분한다. Free 플랜만 사용하며 결제수단 추가·유료 전환·DB·디스크·도메인 생성은 수행하지 않았다. 기존 결제 설정을 임의로 바꾸거나 비용 0원을 보장하지 않는다. 무료 한도·청구 조건이 달라지는 작업은 별도 판단을 받는다.
 
 무료 인스턴스는 유휴 시 정지하고 다시 시작하는 데 시간이 걸리며 재시작될 수 있다. 방은 현재 메모리 기반이어서 서버 재시작 시 사라진다. 개인 기록·할 일·타이머는 해당 배포 Origin의 기기 저장소에 남는다. 기존 개발 Origin 기록이 새 배포에 자동으로 옮겨지지 않으므로 필요한 경우 JSON 백업을 사용한다.
 
 ## 준비한 배포 설정
 
-`deploy/render.preview.yaml`은 [공식 Blueprint 필드](https://render.com/docs/blueprint-spec)에 맞춘 검토용 설정이다. 파일이 존재하는 것만으로 배포하지 않으며 계정의 결제 조건과 무료 한도를 확인한 뒤 Blueprint 또는 동등한 명시 설정으로 적용한다.
+`deploy/render.preview.yaml`은 [공식 Blueprint 필드](https://render.com/docs/blueprint-spec)에 맞춘 검토용 설정이다. 이번 서비스는 파일을 적용하는 Blueprint 방식 대신 연결된 MCP 도구로 직접 생성했다. 아래 준비 설정과 실제 생성 시 도구가 적용할 수 있었던 필드를 구분한다.
 
 - Node.js 24.19.0, 싱가포르 단일 Free Web Service
 - 빌드: `npm ci --include=dev && npm run build`
 - 실행: `npm start`, Render가 제공하는 PORT에 바인딩
-- 상태 확인: `/api/health`
+- 앱 상태 확인 경로: `/api/health`. 검토용 Blueprint에는 HTTP 경로를 명시했지만 직접 생성 도구는 해당 필드를 제공하지 않아 실제 플랫폼 설정은 기본 TCP 확인을 사용
 - 자동 배포 끔. 새 커밋의 배포는 수동으로 검토 후 진행
 - 외부 DB·디스크·음성·영상·분석 SDK 추가 없음
 
-[Render Web Service](https://render.com/docs/web-services)는 공개 HTTPS와 [WebSocket](https://render.com/docs/websocket)을 지원한다. 설정 준비와 로컬 실행 검증은 실제 Render 배포 성공을 뜻하지 않는다. 로컬에서 PORT=3099로 프로덕션 명령을 실행해 HTML·health·실제 WebSocket 방 생성/퇴장 흐름은 통과했다. 플랫폼 계정의 접근 권한·로그 정책·무료 사용량은 배포 직전에 확인한다. 실제 공개 Origin과 서버 요청 Host가 다르면 정확한 공개 Origin만 ALLOWED_ORIGINS에 지정하며 Origin 검사를 완화하지 않는다.
+[Render Web Service](https://render.com/docs/web-services)는 공개 HTTPS와 [WebSocket](https://render.com/docs/websocket)을 지원한다. 설정 준비와 로컬 실행 검증은 실제 Render 배포 성공을 뜻하지 않는다. 로컬에서 PORT=3099로 프로덕션 명령을 실행해 HTML·health·실제 WebSocket 방 생성/퇴장 흐름은 통과했다. 현재 서비스의 외부 HTTPS·health·WebSocket 검증은 아직 완료하지 않았다. 플랫폼 계정의 접근 권한·로그 정책·무료 사용량도 운영 전 별도 확인한다. 실제 공개 Origin과 서버 요청 Host가 다르면 정확한 공개 Origin만 ALLOWED_ORIGINS에 지정하며 Origin 검사를 완화하지 않는다.
 
 ## 배포 실행 순서
 
-1. 계정·결제 조건·노출 범위와 승인한 소스 커밋 확인.
-2. 자동 배포를 끈 단일 무료 서비스를 생성하고 HTTPS·health·Socket.IO 연결 확인.
+1. 완료: 사용자가 워크스페이스·결제수단 부재와 기존 공개 테스트 범위를 확인.
+2. 플랫폼 배포 완료: 단일 무료 서비스의 `live`와 런타임 시작 확인. Cloud 도메인 접근을 해결한 뒤 HTTPS·health·Socket.IO 검증 필요.
 3. 본인 휴대폰에서 처음 집중 → 할 일 시작 → 휴식 → 백업·복원 확인.
 4. 다른 휴대폰과 초대 공유 → 입장 → 응원 → 일시 정지 → 화면 잠금/복귀 → 퇴장 확인.
 5. iOS Safari/Android Chrome별 결과를 남기고 실패한 기능을 수정.
