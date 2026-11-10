@@ -30,6 +30,7 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
   });
   const rooms = new Map<string, Room>();
   const memberships = new Map<string, string>();
+  const activeTokens = new Map<string, string>();
   const pending = new Map<string, { id: string; timeout: ReturnType<typeof setTimeout> }>();
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   const emitRoom = (room: Room) => io.to(room.code).emit('room:update', room);
@@ -46,19 +47,25 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
   io.on('connection', socket => {
     const suppliedToken = socket.handshake.auth?.resumeToken;
     const previous = typeof suppliedToken === 'string' ? pending.get(suppliedToken) : undefined;
-    const resumeToken = previous ? suppliedToken : randomBytes(32).toString('hex');
+    const previousId = previous?.id ?? (typeof suppliedToken === 'string' ? activeTokens.get(suppliedToken) : undefined);
+    const resumeToken = previousId ? suppliedToken : randomBytes(32).toString('hex');
     socket.data.resumeToken = resumeToken;
-    if (previous) {
-      clearTimeout(previous.timeout); pending.delete(resumeToken);
-      const code = memberships.get(previous.id);
+    if (previous) { clearTimeout(previous.timeout); pending.delete(resumeToken); }
+    if (previousId) {
+      const code = memberships.get(previousId);
       const room = rooms.get(code ?? '');
-      const member = room?.members.find(m => m.id === previous.id);
-      memberships.delete(previous.id);
-      if (room && member) {
+      const member = room?.members.find(m => m.id === previousId);
+      if (socket.handshake.auth?.roomCode === null) {
+        leave(previousId);
+      } else if (room && member) {
+        memberships.delete(previousId);
+        io.sockets.sockets.get(previousId)?.leave(room.code);
         member.id = socket.id; member.online = true;
         memberships.set(socket.id, room.code); socket.join(room.code); emitRoom(room);
       }
     }
+    activeTokens.set(resumeToken, socket.id);
+    if (previousId) io.sockets.sockets.get(previousId)?.disconnect(true);
     socket.emit('session', { resumeToken });
     let count = 0;
     let windowStart = Date.now();
@@ -111,6 +118,7 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
     });
     socket.on('room:leave', () => leave(socket.id));
     socket.on('disconnect', () => {
+      if (activeTokens.get(resumeToken) === socket.id) activeTokens.delete(resumeToken);
       const room = rooms.get(memberships.get(socket.id) ?? '');
       if (!room) return;
       const member = room.members.find(m => m.id === socket.id);
