@@ -1,10 +1,10 @@
 # 실제 휴대폰 테스트 배포 제안
 
-상태: 검토용 설정과 절차 준비. 서비스 생성·계정 연결·외부 배포는 아직 수행하지 않았다. 앱의 외부 공개 범위가 달라지므로 사용자 승인 후 진행한다.
+상태: 기능 화면 확인 후 사용자가 다음 단계의 Render 무료 테스트 배포 진행을 승인했다. Render 추가·계정 연결을 기다리는 중이며, 결제 조건·무료 한도 확인 전에는 서비스를 생성하지 않는다. 서비스 생성·외부 배포는 아직 수행하지 않았다.
 
 ## 현재 스냅샷
 
-GitHub 초안 PR #1의 개발 브랜치 `feat/study-plan-and-focus-flow`에 기능을 전달했다. 공부할 일·남은 목표 이어 하기·기록 진행률·5분 휴식·친구 초대 공유·진행 중 타이머 복귀가 구현됐다. 단위·서버 17개와 브라우저 29개 시나리오를 검증했다. 카메라 표정 연결은 사용자가 후속으로 승인해 구현·검증 중이다. 사용자가 요청한 기능별 화면 확인이 끝나기 전에는 실제 배포를 진행하지 않는다. 실제 iOS Safari·Android Chrome·OS 화면 잠금·실제 공유 시트·실제 카메라는 아직 검증하지 않았다.
+GitHub 초안 PR #1의 개발 브랜치 `feat/study-plan-and-focus-flow`에 기능을 전달했다. 공부할 일·남은 목표 이어 하기·기록 진행률·5분 휴식·친구 초대 공유·진행 중 타이머 복귀가 구현됐다. 선택형 카메라 표정 연결을 포함해 단위·서버 23개와 브라우저 36개 시나리오를 검증했다. 화면과 가상 카메라 입력의 실제 앱 동작을 보여준 뒤 사용자가 다음 단계 진행을 승인했다. 실제 iOS Safari·Android Chrome·OS 화면 잠금·실제 공유 시트·실제 카메라는 아직 검증하지 않았다.
 
 ## 선택지와 추천
 
@@ -24,7 +24,7 @@ GitHub 초안 PR #1의 개발 브랜치 `feat/study-plan-and-focus-flow`에 기�
 
 ## 준비한 배포 설정
 
-`deploy/render.preview.yaml`은 [공식 Blueprint 필드](https://render.com/docs/blueprint-spec)에 맞춘 검토용 설정이다. 파일이 존재하는 것만으로 배포하지 않으며 승인 전에는 Blueprint를 적용하지 않는다.
+`deploy/render.preview.yaml`은 [공식 Blueprint 필드](https://render.com/docs/blueprint-spec)에 맞춘 검토용 설정이다. 파일이 존재하는 것만으로 배포하지 않으며 계정의 결제 조건과 무료 한도를 확인한 뒤 Blueprint 또는 동등한 명시 설정으로 적용한다.
 
 - Node.js 24.19.0, 싱가포르 단일 Free Web Service
 - 빌드: `npm ci --include=dev && npm run build`
@@ -35,7 +35,7 @@ GitHub 초안 PR #1의 개발 브랜치 `feat/study-plan-and-focus-flow`에 기�
 
 [Render Web Service](https://render.com/docs/web-services)는 공개 HTTPS와 [WebSocket](https://render.com/docs/websocket)을 지원한다. 설정 준비와 로컬 실행 검증은 실제 Render 배포 성공을 뜻하지 않는다. 로컬에서 PORT=3099로 프로덕션 명령을 실행해 HTML·health·실제 WebSocket 방 생성/퇴장 흐름은 통과했다. 플랫폼 계정의 접근 권한·로그 정책·무료 사용량은 배포 직전에 확인한다. 실제 공개 Origin과 서버 요청 Host가 다르면 정확한 공개 Origin만 ALLOWED_ORIGINS에 지정하며 Origin 검사를 완화하지 않는다.
 
-## 승인 후 실행 순서
+## 배포 실행 순서
 
 1. 계정·결제 조건·노출 범위와 승인한 소스 커밋 확인.
 2. 자동 배포를 끈 단일 무료 서비스를 생성하고 HTTPS·health·Socket.IO 연결 확인.
