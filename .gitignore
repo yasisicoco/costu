@@ -11,3 +11,5 @@ test-results/
 *.tsbuildinfo
 AGENT.md
 AGENTS.md
+
+public/face-models/

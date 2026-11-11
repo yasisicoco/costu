@@ -28,3 +28,9 @@ test('120분 및 0초를 표시한다', () => {
   assert.equal(formatTime(7200), '120:00');
   assert.equal(formatTime(0), '00:00');
 });
+
+test('기기 시각이 뒤로 이동해도 설정한 시간 이상으로 늘어나지 않는다', () => {
+  const timer = { ...newTimer(5), status: 'running' as const, deadline: 900000 };
+  assert.equal(remainingSeconds(timer, 0), 300);
+  assert.equal(elapsedSeconds(timer, 0), 0);
+});

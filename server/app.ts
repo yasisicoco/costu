@@ -3,18 +3,21 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { Server } from 'socket.io';
 import { z } from 'zod';
-import type { Member, Room } from '../shared/types';
+import type { AvatarMotion, Member, Room } from '../shared/types';
 
 const profileSchema = z.object({ name: z.string().trim().min(1).max(16), avatar: z.enum(['cat', 'bunny', 'bear', 'frog']) });
 const joinSchema = profileSchema.extend({ code: z.string().regex(/^[A-Z2-9]{8}$/) });
 const createSchema = profileSchema.extend({ roomName: z.string().trim().min(1).max(32) });
 const statusSchema = z.enum(['ready', 'focusing', 'away']);
 const reactions = z.enum(['👏', '🌱', '🔥', '☕']);
+const headAxis = z.number().finite().min(-1).max(1);
+const expression = z.number().finite().min(0).max(1);
+const motionSchema: z.ZodType<AvatarMotion | null> = z.object({ yaw: headAxis, pitch: headAxis, roll: headAxis, leftEye: expression, rightEye: expression, mouth: expression, smile: expression }).strict().nullable();
 
 export function createApp({ disconnectGraceMs = 30000 } = {}) {
   const app = express();
   app.disable('x-powered-by');
-  app.use((_req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin'); res.setHeader('Permissions-Policy', 'camera=(), microphone=()'); next(); });
+  app.use((_req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin'); res.setHeader('Permissions-Policy', 'camera=(self), microphone=()'); next(); });
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     maxHttpBufferSize: 4096,
@@ -30,6 +33,7 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
   });
   const rooms = new Map<string, Room>();
   const memberships = new Map<string, string>();
+  const activeTokens = new Map<string, string>();
   const pending = new Map<string, { id: string; timeout: ReturnType<typeof setTimeout> }>();
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   const emitRoom = (room: Room) => io.to(room.code).emit('room:update', room);
@@ -46,19 +50,25 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
   io.on('connection', socket => {
     const suppliedToken = socket.handshake.auth?.resumeToken;
     const previous = typeof suppliedToken === 'string' ? pending.get(suppliedToken) : undefined;
-    const resumeToken = previous ? suppliedToken : randomBytes(32).toString('hex');
+    const previousId = previous?.id ?? (typeof suppliedToken === 'string' ? activeTokens.get(suppliedToken) : undefined);
+    const resumeToken = previousId ? suppliedToken : randomBytes(32).toString('hex');
     socket.data.resumeToken = resumeToken;
-    if (previous) {
-      clearTimeout(previous.timeout); pending.delete(resumeToken);
-      const code = memberships.get(previous.id);
+    if (previous) { clearTimeout(previous.timeout); pending.delete(resumeToken); }
+    if (previousId) {
+      const code = memberships.get(previousId);
       const room = rooms.get(code ?? '');
-      const member = room?.members.find(m => m.id === previous.id);
-      memberships.delete(previous.id);
-      if (room && member) {
+      const member = room?.members.find(m => m.id === previousId);
+      if (socket.handshake.auth?.roomCode === null) {
+        leave(previousId);
+      } else if (room && member) {
+        memberships.delete(previousId);
+        io.sockets.sockets.get(previousId)?.leave(room.code);
         member.id = socket.id; member.online = true;
         memberships.set(socket.id, room.code); socket.join(room.code); emitRoom(room);
       }
     }
+    activeTokens.set(resumeToken, socket.id);
+    if (previousId) io.sockets.sockets.get(previousId)?.disconnect(true);
     socket.emit('session', { resumeToken });
     let count = 0;
     let windowStart = Date.now();
@@ -66,6 +76,7 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
       if (Date.now() - windowStart > 10000) { windowStart = Date.now(); count = 0; }
       return ++count <= 30;
     };
+    let motionTimes: number[] = [];
     socket.on('room:create', (input, callback) => {
       if (typeof callback !== 'function') return;
       if (!allowed()) return callback({ ok: false, error: '잠시 후 다시 시도해 주세요.' });
@@ -109,8 +120,19 @@ export function createApp({ disconnectGraceMs = 30000 } = {}) {
       const code = memberships.get(socket.id);
       if (parsed.success && code) io.to(code).emit('reaction', { memberId: socket.id, emoji: parsed.data, at: Date.now() });
     });
+    socket.on('avatar:motion', input => {
+      const code = memberships.get(socket.id);
+      if (!code) return;
+      const now = performance.now();
+      motionTimes = motionTimes.filter(at => now - at < 1000);
+      if (motionTimes.length >= (input === null ? 8 : 7)) return;
+      motionTimes.push(now);
+      const parsed = motionSchema.safeParse(input);
+      if (parsed.success) socket.to(code).emit('avatar:motion', { memberId: socket.id, motion: parsed.data });
+    });
     socket.on('room:leave', () => leave(socket.id));
     socket.on('disconnect', () => {
+      if (activeTokens.get(resumeToken) === socket.id) activeTokens.delete(resumeToken);
       const room = rooms.get(memberships.get(socket.id) ?? '');
       if (!room) return;
       const member = room.members.find(m => m.id === socket.id);

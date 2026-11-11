@@ -1,7 +1,7 @@
 import { Avatar } from './Avatar';
-import type { Avatar as AvatarType } from '../../shared/types';
+import type { Avatar as AvatarType, AvatarMotion } from '../../shared/types';
 
-export function StudyScene({ avatar, active }: { avatar: AvatarType; active: boolean }) {
+export function StudyScene({ avatar, active, motion }: { avatar: AvatarType; active: boolean; motion?: AvatarMotion | null }) {
   return <div className={`study-scene ${active ? 'is-studying' : ''}`} aria-hidden="true">
     <svg viewBox="0 0 660 260" className="scene-art">
       <defs><linearGradient id="sky" x2="0" y2="1"><stop stopColor="#dce5d8"/><stop offset="1" stopColor="#eef1df"/></linearGradient><pattern id="paper" width="15" height="15" patternUnits="userSpaceOnUse"><path d="M0 15h15" stroke="#ece8de" strokeWidth=".6"/></pattern></defs>
@@ -30,7 +30,7 @@ export function StudyScene({ avatar, active }: { avatar: AvatarType; active: boo
       <path d="M178 65h31m-15-15v30" stroke="#d5d9c5" strokeWidth="2"/>
       <circle cx="469" cy="61" r="3" fill="#c4cbaa"/>
     </svg>
-    <div className="scene-avatar"><Avatar kind={avatar} size={88}/></div>
+    <div className="scene-avatar"><Avatar kind={avatar} size={88} motion={motion}/></div>
     <div className="scene-caption">{active ? '지금 이 순간, 나에게 집중하는 중' : '작은 시작이 모여, 나만의 속도가 돼요'}</div>
   </div>;
 }

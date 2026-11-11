@@ -75,3 +75,79 @@ test('알 수 없는 웹 Origin의 WebSocket 연결을 거절한다', async () =
     assert.equal(socket.connected, false);
   } finally { socket.disconnect(); await new Promise<void>(resolve => io.close(() => resolve())); }
 });
+
+test('재접속은 같은 자리를 복원하고 단절 중 퇴장한 자리는 복원하지 않는다', async () => {
+  const { httpServer, io, rooms } = createApp({ disconnectGraceMs: 1000 });
+  await new Promise<void>(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address(); assert.ok(address && typeof address !== 'string');
+  const clients: Socket[] = [];
+  const client = async (auth = {}) => {
+    const socket = connect(`http://127.0.0.1:${address.port}`, { transports: ['websocket'], forceNew: true, auth }); clients.push(socket);
+    const session = await new Promise<{ resumeToken: string }>((resolve, reject) => { socket.once('session', resolve); socket.once('connect_error', reject); });
+    return { socket, ...session };
+  };
+  const until = async (predicate: () => boolean) => {
+    for (let i = 0; i < 100; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
+    assert.fail('방 상태 변경 시간 초과');
+  };
+  try {
+    const first = await client();
+    const created: Reply = await first.socket.timeout(2000).emitWithAck('room:create', { name: '나', avatar: 'cat', roomName: '복귀 검증' });
+    const code = created.room!.code;
+    first.socket.emit('presence:update', 'away');
+    await until(() => rooms.get(code)?.members[0].status === 'away');
+    first.socket.disconnect();
+    await until(() => rooms.get(code)?.members[0].online === false);
+    const resumed = await client({ resumeToken: first.resumeToken, roomCode: code });
+    const joined: Reply = await resumed.socket.timeout(2000).emitWithAck('room:join', { name: '나', avatar: 'cat', code });
+    assert.equal(joined.room!.members.length, 1);
+    assert.equal(joined.room!.members[0].id, resumed.socket.id);
+    assert.equal(joined.room!.members[0].status, 'away');
+    assert.equal(joined.room!.members[0].online, true);
+    resumed.socket.disconnect();
+    await until(() => rooms.get(code)?.members[0].online === false);
+    await client({ resumeToken: resumed.resumeToken, roomCode: null });
+    assert.equal(rooms.has(code), false);
+  } finally { clients.forEach(socket => socket.disconnect()); await new Promise<void>(resolve => io.close(() => resolve())); }
+});
+
+test('재접속 유예가 만료된 서재는 되살리지 않는다', async () => {
+  const { httpServer, io, rooms } = createApp({ disconnectGraceMs: 20 });
+  await new Promise<void>(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address(); assert.ok(address && typeof address !== 'string');
+  const socket = connect(`http://127.0.0.1:${address.port}`, { transports: ['websocket'], forceNew: true });
+  let resumed: Socket | undefined;
+  try {
+    const { resumeToken } = await new Promise<{ resumeToken: string }>(resolve => socket.once('session', resolve));
+    const created: Reply = await socket.timeout(2000).emitWithAck('room:create', { name: '나', avatar: 'cat', roomName: '만료 검증' });
+    socket.disconnect(); await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(rooms.size, 0);
+    resumed = connect(`http://127.0.0.1:${address.port}`, { transports: ['websocket'], auth: { resumeToken } });
+    await new Promise<void>(resolve => resumed!.once('connect', resolve));
+    const result: Reply = await resumed.timeout(2000).emitWithAck('room:join', { name: '나', avatar: 'cat', code: created.room!.code });
+    assert.equal(result.ok, false); assert.equal(rooms.size, 0);
+  } finally { socket.disconnect(); resumed?.disconnect(); await new Promise<void>(resolve => io.close(() => resolve())); }
+});
+
+test('서버가 이전 연결의 단절을 감지하기 전 복귀해도 자리를 중복 생성하지 않는다', async () => {
+  const { httpServer, io, rooms } = createApp();
+  await new Promise<void>(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address(); assert.ok(address && typeof address !== 'string');
+  const first = connect(`http://127.0.0.1:${address.port}`, { transports: ['websocket'], forceNew: true });
+  let next: Socket | undefined;
+  try {
+    const { resumeToken } = await new Promise<{ resumeToken: string }>(resolve => first.once('session', resolve));
+    const created: Reply = await first.timeout(2000).emitWithAck('room:create', { name: '나', avatar: 'cat', roomName: '빠른 복귀' });
+    const disconnected = new Promise<void>(resolve => first.once('disconnect', () => resolve()));
+    next = connect(`http://127.0.0.1:${address.port}`, { transports: ['websocket'], forceNew: true, auth: { resumeToken, roomCode: created.room!.code } });
+    await new Promise<void>(resolve => next!.once('session', () => resolve()));
+    await disconnected;
+    const room = rooms.get(created.room!.code)!;
+    assert.equal(room.members.length, 1); assert.equal(room.members[0].id, next.id);
+    const joined: Reply = await next.timeout(2000).emitWithAck('room:join', { name: '나', avatar: 'cat', code: room.code });
+    assert.equal(joined.room!.members.length, 1);
+    next.emit('room:leave');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(rooms.size, 0);
+  } finally { first.disconnect(); next?.disconnect(); await new Promise<void>(resolve => io.close(() => resolve())); }
+});

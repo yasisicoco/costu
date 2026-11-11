@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Coffee, Copy, Flame, Leaf, Link, LogOut, Pause, Play, Plus, Settings2, ShieldCheck, Sparkles, Sprout, Square, Sun, Target, Timer, Users, Volume2, VolumeX, X } from 'lucide-react';
-import type { Avatar as AvatarType, Presence, Profile, Reply, Room, StudySession } from '../shared/types';
+import { ArrowDownToLine, ArrowRight, ArrowUpFromLine, BarChart3, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Coffee, Copy, Flame, Leaf, Link, LogOut, Pause, Play, Plus, Settings2, Share2, ShieldCheck, Sparkles, Sprout, Square, Sun, Target, Timer, Users, Volume2, VolumeX, X } from 'lucide-react';
+import type { Avatar as AvatarType, Presence, Profile, Reply, Room, StudySession, StudyTask, TimerState, AvatarMotion } from '../shared/types';
 import { Avatar } from './components/Avatar';
 import { StudyScene } from './components/StudyScene';
+import { StudyPlan } from './components/StudyPlan';
+import { CameraAvatarPanel } from './components/CameraAvatarPanel';
+import { useCameraAvatar } from './hooks/useCameraAvatar';
 import { Modal } from './components/Modal';
-import { daySeconds, elapsedSeconds, formatMinutes, formatTime, localDate, newTimer, remainingSeconds } from './lib/study';
-import { parseBackup, readProfile, readSessions, readTimer, writeStorage } from './lib/storage';
+import { daySeconds, elapsedSeconds, formatMinutes, formatTime, localDate, newTimer, remainingSeconds, taskProgress, timerPresence } from './lib/study';
+import { parseBackup, parseBackupTasks, readProfile, readSessions, readTasks, readTimer, writeStorage } from './lib/storage';
 
 type Page = 'focus' | 'records' | 'settings';
 type Dialog = 'create' | 'join' | 'duration' | 'finish' | 'help' | null;
@@ -17,11 +20,13 @@ export default function App() {
   const [page, setPage] = useState<Page>('focus');
   const [profile, setProfile] = useState<Profile>(readProfile);
   const [sessions, setSessions] = useState<StudySession[]>(readSessions);
-  const [timer, setTimer] = useState(readTimer);
+  const [tasks, setTasks] = useState<StudyTask[]>(readTasks);
+  const [timer, setTimerState] = useState(() => readTimer());
   const [now, setNow] = useState(Date.now());
   const [dialog, setDialog] = useState<Dialog>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [connected, setConnected] = useState(false);
+  const [roomReady, setRoomReady] = useState(false);
   const [selfId, setSelfId] = useState('');
   const [tab, setTab] = useState<'solo' | 'together'>('solo');
   const [roomName, setRoomName] = useState('우리의 작은 서재');
@@ -33,27 +38,56 @@ export default function App() {
   const [storageError, setStorageError] = useState(false);
   const [reactions, setReactions] = useState<Record<string, { emoji: string; at: number }>>({});
   const [sound, setSound] = useState(false);
+  const [remoteMotions, setRemoteMotions] = useState<Record<string, { motion: AvatarMotion; at: number }>>({});
   const socketRef = useRef<Socket | null>(null);
   const roomRef = useRef<Room | null>(null);
+  const roomCodeRef = useRef<string | null>(null);
+  const roomReadyRef = useRef(false);
+  const roomAttempt = useRef(0);
   const profileRef = useRef(profile);
   const timerRef = useRef(timer);
+  const tasksRef = useRef(tasks);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const audioRef = useRef<AudioContext | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
-  profileRef.current = profile; timerRef.current = timer; roomRef.current = room;
+  const lastMotionSent = useRef(-Infinity);
+  const lastMotionValue = useRef<AvatarMotion | null>(null);
+  const camera = useCameraAvatar(sendMotion);
+  profileRef.current = profile; timerRef.current = timer; roomRef.current = room; tasksRef.current = tasks;
+
+  function sendMotion(motion: AvatarMotion | null) {
+    const socket = socketRef.current;
+    if (!socket?.connected || !roomReadyRef.current) return;
+    if (motion === null && lastMotionValue.current === null) return;
+    const time = performance.now();
+    if (motion !== null && time - lastMotionSent.current < 250) return;
+    lastMotionSent.current = time; lastMotionValue.current = motion;
+    if (motion === null) socket.emit('avatar:motion', null);
+    else socket.volatile.emit('avatar:motion', motion);
+  }
 
   function notify(message: string) { setToast(message); clearTimeout(toastTimeout.current); toastTimeout.current = setTimeout(() => setToast(''), 4200); }
-  function save(key: string, value: unknown) { if (!writeStorage(key, value)) setStorageError(true); }
+  function save(key: string, value: unknown) { const saved = writeStorage(key, value); if (!saved) setStorageError(true); return saved; }
+  function setTimer(next: TimerState) { timerRef.current = next; save('timer', next); setTimerState(next); }
+  function syncPresence() {
+    const socket = socketRef.current;
+    if (socket?.connected && roomReadyRef.current) socket.emit('presence:update', timerPresence(timerRef.current));
+  }
+  function rememberRoom(code: string | null) {
+    roomCodeRef.current = code;
+    if (socketRef.current) socketRef.current.auth = { ...socketRef.current.auth, roomCode: code };
+    try { if (code) sessionStorage.setItem('costu:room', code); else sessionStorage.removeItem('costu:room'); } catch {}
+  }
 
   useEffect(() => { save('profile', profile); }, [profile]);
-  useEffect(() => { save('sessions', sessions); }, [sessions]);
-  useEffect(() => { save('timer', timer); }, [timer]);
+  useEffect(() => { syncPresence(); }, [timer]);
   useEffect(() => {
     const sync = (event: StorageEvent) => {
       if (event.storageArea !== localStorage) return;
       if (event.key === 'costu:profile') setProfile(readProfile());
+      if (event.key === 'costu:tasks') { const next = readTasks(); tasksRef.current = next; setTasks(next); }
       if (event.key === 'costu:sessions') setSessions(readSessions());
-      if (event.key === 'costu:timer') setTimer(readTimer());
+      if (event.key === 'costu:timer') { const next = readTimer(); timerRef.current = next; setTimerState(next); setNow(Date.now()); }
     };
     window.addEventListener('storage', sync);
     return () => window.removeEventListener('storage', sync);
@@ -62,25 +96,28 @@ export default function App() {
     const tick = () => setNow(Date.now());
     const interval = setInterval(tick, 500);
     document.addEventListener('visibilitychange', tick);
-    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', tick); };
+    window.addEventListener('pageshow', tick);
+    window.addEventListener('focus', tick);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', tick); window.removeEventListener('pageshow', tick); window.removeEventListener('focus', tick); };
   }, []);
 
   function finish(completed = false) {
-    const current = timerRef.current;
-    if (current.status === 'idle') return;
+    const previous = timerRef.current;
+    if (previous.status === 'idle') return;
+    const current = readTimer(previous);
+    if (current.id !== previous.id || current.status === 'idle' || (completed && (current.status !== 'running' || remainingSeconds(current) > 0))) { timerRef.current = current; setTimerState(current); setDialog(null); return; }
     const seconds = completed ? current.duration : elapsedSeconds(current);
-    if (seconds > 0) {
-      const session: StudySession = { id: current.id, startedAt: current.startedAt, endedAt: completed && current.deadline ? current.deadline : Date.now(), seconds, mode: current.mode, subject: current.subject || '자유 공부' };
-      setSessions(previous => {
-        const merged = new Map([...readSessions(), ...previous].map(s => [s.id, s]));
-        merged.set(session.id, session);
-        return [...merged.values()].sort((a, b) => a.endedAt - b.endedAt);
-      });
+    const resting = current.kind === 'break';
+    if (!resting && seconds > 0) {
+      const session: StudySession = { id: current.id, startedAt: current.startedAt, endedAt: completed && current.deadline ? current.deadline : Date.now(), seconds, mode: current.mode, taskId: current.taskId, subject: current.subject || '자유 공부' };
+      const merged = new Map([...readSessions(), ...sessions].map(s => [s.id, s]));
+      if (!merged.has(session.id)) merged.set(session.id, session);
+      const next = [...merged.values()].sort((a, b) => a.endedAt - b.endedAt);
+      save('sessions', next); setSessions(next);
     }
-    const next = newTimer(current.duration / 60);
-    timerRef.current = next;
-    setTimer(next); setDialog(null); socketRef.current?.emit('presence:update', 'ready');
-    notify(seconds > 0 ? `${formatMinutes(seconds)}의 집중을 기록했어요. 수고했어요!` : '다음 집중을 준비했어요.');
+    const next = { ...newTimer((resting ? current.focusDuration ?? 1500 : current.duration) / 60), breakAvailable: !resting && seconds > 0 };
+    setTimer(next); setDialog(null);
+    notify(resting ? '휴식을 마쳤어요. 준비되면 다음 집중을 시작해 보세요.' : seconds > 0 ? `${formatMinutes(seconds)}의 집중을 기록했어요. 수고했어요!` : '다음 집중을 준비했어요.');
   }
 
   useEffect(() => { if (timer.status === 'running' && remainingSeconds(timer, now) === 0) finish(true); }, [now, timer]);
@@ -91,26 +128,38 @@ export default function App() {
   useEffect(() => {
     let resumeToken: string | null = null;
     try { resumeToken = sessionStorage.getItem('costu:resume'); } catch {}
-    const socket = io({ autoConnect: true, auth: { resumeToken } });
+    try { roomCodeRef.current = sessionStorage.getItem('costu:room'); } catch {}
+    const socket = io({ autoConnect: navigator.onLine, auth: { resumeToken, roomCode: roomCodeRef.current } });
     socketRef.current = socket;
     socket.on('session', ({ resumeToken: token }: { resumeToken: string }) => {
-      socket.auth = { resumeToken: token };
+      socket.auth = { resumeToken: token, roomCode: roomCodeRef.current };
       try { sessionStorage.setItem('costu:resume', token); } catch {}
     });
     socket.on('connect', () => {
       setConnected(true); setSelfId(socket.id ?? '');
-      let code = roomRef.current?.code;
-      try { code = code ?? sessionStorage.getItem('costu:room') ?? undefined; } catch {}
+      const code = roomCodeRef.current;
+      const attempt = ++roomAttempt.current;
       if (code) socket.timeout(5000).emit('room:join', { ...profileRef.current, code }, (err: Error | null, result: Reply) => {
-        if (err || !result?.ok) { setRoom(null); roomRef.current = null; try { sessionStorage.removeItem('costu:room'); } catch {} notify('이전 방에 다시 연결하지 못했어요. 초대 코드로 다시 참여해 주세요.'); return; }
-        setRoom(result.room!); setTab('together'); socket.emit('presence:update', timerRef.current.status === 'running' ? 'focusing' : 'ready');
+        if (attempt !== roomAttempt.current || !socket.connected || roomCodeRef.current !== code) return;
+        if (err) { notify('서재 응답이 늦어지고 있어요. 다시 연결해 주세요. 개인 타이머는 계속돼요.'); return; }
+        if (!result?.ok) { setRoom(null); roomRef.current = null; rememberRoom(null); notify('이전 방에 다시 연결하지 못했어요. 초대 코드로 다시 참여해 주세요.'); return; }
+        setRoom(result.room!); roomRef.current = result.room!; setSelfId(result.memberId!); setTab('together'); roomReadyRef.current = true; setRoomReady(true); syncPresence();
       });
     });
-    socket.on('disconnect', () => setConnected(false));
-    socket.on('room:update', (next: Room) => setRoom(next));
+    socket.on('disconnect', () => { ++roomAttempt.current; setConnected(false); setBusy(false); setRemoteMotions({}); roomReadyRef.current = false; setRoomReady(false); });
+    socket.on('connect_error', () => { setConnected(false); setBusy(false); setRemoteMotions({}); roomReadyRef.current = false; setRoomReady(false); });
+    socket.on('room:update', (next: Room) => { if (next.code === roomCodeRef.current) { roomRef.current = next; setRoom(next); setRemoteMotions(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => next.members.some(member => member.id === id && member.online !== false)))); } });
+    socket.on('avatar:motion', ({ memberId, motion }: { memberId: string; motion: AvatarMotion | null }) => {
+      if (!roomReadyRef.current || !roomRef.current?.members.some(member => member.id === memberId && member.online !== false)) return;
+      setRemoteMotions(previous => { const next = { ...previous }; if (motion) next[memberId] = { motion, at: Date.now() }; else delete next[memberId]; return next; });
+    });
     socket.on('reaction', (reaction: { memberId: string; emoji: string; at: number }) => setReactions(previous => ({ ...previous, [reaction.memberId]: { ...reaction, at: Date.now() } })));
+    const offline = () => socket.disconnect();
+    const online = () => socket.connect();
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', online);
     if (new URLSearchParams(location.search).has('room')) { setDialog('join'); history.replaceState({}, '', location.pathname); }
-    return () => { socket.disconnect(); socketRef.current = null; };
+    return () => { window.removeEventListener('offline', offline); window.removeEventListener('online', online); socket.disconnect(); socketRef.current = null; };
   }, []);
 
   useEffect(() => () => { clearTimeout(toastTimeout.current); audioRef.current?.close(); }, []);
@@ -120,6 +169,7 @@ export default function App() {
   const todaySessions = sessions.filter(s => localDate(s.endedAt) === localDate(now));
   const percentage = Math.min(100, Math.floor(today / (profile.goal * 60) * 100));
   const myStatus = room?.members.find(m => m.id === selfId)?.status ?? 'ready';
+  const resting = timer.kind === 'break';
   const active = timer.status === 'running';
   const total = sessions.reduce((sum, session) => sum + session.seconds, 0);
 
@@ -127,11 +177,58 @@ export default function App() {
     const current = timerRef.current;
     if (current.status === 'running') {
       setTimer({ ...current, remaining: remainingSeconds(current), deadline: null, status: 'paused' });
-      socketRef.current?.emit('presence:update', 'away');
     } else {
-      setTimer({ ...current, startedAt: current.startedAt || Date.now(), deadline: Date.now() + current.remaining * 1000, status: 'running', mode: room ? 'together' : current.mode });
-      socketRef.current?.emit('presence:update', 'focusing');
+      setTimer({ ...current, breakAvailable: false, startedAt: current.startedAt || Date.now(), deadline: Date.now() + current.remaining * 1000, status: 'running', mode: room ? 'together' : current.mode });
     }
+  }
+
+  function startBreak() {
+    const current = timerRef.current;
+    if (current.status !== 'idle' || !current.breakAvailable) return;
+    const next = { ...newTimer(5), kind: 'break' as const, focusDuration: current.duration, startedAt: Date.now(), deadline: Date.now() + 300000, status: 'running' as const };
+    setTimer(next); setNow(Date.now());
+  }
+
+  function saveTasks(next: StudyTask[]) {
+    tasksRef.current = next; const saved = save('tasks', next); setTasks(next); return saved;
+  }
+
+  function addTask(title: string, minutes: number) {
+    const trimmed = title.trim();
+    if (!trimmed || trimmed.length > 50 || !Number.isInteger(minutes) || minutes < 1 || minutes > 120) return false;
+    saveTasks([...tasksRef.current, { id: crypto.randomUUID(), title: trimmed, minutes, createdAt: Date.now(), completed: false }]);
+    return true;
+  }
+
+  function startTask(id: string) {
+    if (timerRef.current.status !== 'idle') { notify('지금의 집중이나 휴식을 마친 뒤 시작해 주세요.'); return; }
+    const task = tasksRef.current.find(item => item.id === id);
+    if (!task) return;
+    const progress = taskProgress(task, sessions);
+    if (progress.completed) return;
+    const next = newTimer(progress.nextMinutes);
+    setTimer({ ...next, taskId: task.id, subject: task.title, startedAt: Date.now(), deadline: Date.now() + next.duration * 1000, status: 'running', mode: room ? 'together' : 'solo' });
+    setNow(Date.now());
+    returnToFocus();
+  }
+
+  function toggleTask(id: string) {
+    if (timerRef.current.taskId === id && timerRef.current.status !== 'idle') return;
+    saveTasks(tasksRef.current.map(task => task.id === id ? { ...task, completed: !task.completed } : task));
+  }
+
+  function deleteTask(id: string) {
+    if (timerRef.current.taskId === id && timerRef.current.status !== 'idle') return;
+    saveTasks(tasksRef.current.filter(task => task.id !== id));
+  }
+
+  function returnToFocus() {
+    setPage('focus');
+    requestAnimationFrame(() => {
+      const button = document.querySelector<HTMLButtonElement>('.start-button');
+      button?.focus({ preventScroll: true });
+      document.querySelector('.focus-card')?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    });
   }
 
   function openDialog(next: Dialog) { setError(''); setBusy(false); setDialog(next); }
@@ -141,21 +238,33 @@ export default function App() {
     const socket = socketRef.current;
     if (!socket?.connected) { setError('서버에 연결 중이에요. 잠시 후 다시 시도해 주세요.'); return; }
     setBusy(true);
+    const attempt = ++roomAttempt.current;
     socket.timeout(5000).emit(dialog === 'create' ? 'room:create' : 'room:join', { ...profile, roomName, code: joinCode.trim().toUpperCase() }, (err: Error | null, result: Reply) => {
+      if (attempt !== roomAttempt.current || !socket.connected) return;
       setBusy(false);
       if (err || !result?.ok) { setError(err ? '응답이 늦어지고 있어요. 다시 시도해 주세요.' : result.error ?? '방에 참여하지 못했어요.'); return; }
       setRoom(result.room!); roomRef.current = result.room!; setSelfId(result.memberId!); setTab('together'); setPage('focus'); setDialog(null);
-      try { sessionStorage.setItem('costu:room', result.room!.code); } catch {}
-      if (timerRef.current.status !== 'idle') setTimer(previous => ({ ...previous, mode: 'together' }));
-      socket.emit('presence:update', timerRef.current.status === 'running' ? 'focusing' : 'ready');
+      rememberRoom(result.room!.code); roomReadyRef.current = true; setRoomReady(true);
+      if (timerRef.current.status !== 'idle') setTimer({ ...timerRef.current, mode: 'together' });
+      syncPresence();
       notify(dialog === 'create' ? '서재를 만들었어요. 친구에게 초대 링크를 보내 보세요.' : '서재에 들어왔어요. 반가워요!');
     });
   }
 
   function leaveRoom() {
-    socketRef.current?.emit('room:leave'); setRoom(null); roomRef.current = null; setTab('solo');
-    try { sessionStorage.removeItem('costu:room'); } catch {}
+    ++roomAttempt.current; rememberRoom(null);
+    if (socketRef.current?.connected) socketRef.current.emit('room:leave');
+    roomReadyRef.current = false; setRoomReady(false); setRemoteMotions({}); setRoom(null); roomRef.current = null; setTab('solo');
     notify('서재에서 나왔어요. 나의 타이머는 계속 사용할 수 있어요.');
+  }
+
+  async function shareInvite() {
+    if (!room || !roomReady) return;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'costu — 함께 집중해요', text: `${room.name}에서 아바타로 함께 공부해요.`, url: `${location.origin}/?room=${room.code}` }); return; }
+      catch (error) { if ((error instanceof Error || error instanceof DOMException) && error.name === 'AbortError') return; }
+    }
+    await copyInvite();
   }
 
   async function copyInvite() {
@@ -180,7 +289,7 @@ export default function App() {
   }
 
   function exportRecords() {
-    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), profile, sessions }, null, 2)], { type: 'application/json' }));
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), profile, sessions, tasks: tasksRef.current }, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = `costu-records-${localDate(now)}.json`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); notify('공부 기록을 내보냈어요.');
   }
 
@@ -188,13 +297,17 @@ export default function App() {
     if (!file) return;
     try {
       if (file.size > 5 * 1024 * 1024) throw new Error('too large');
-      const imported = parseBackup(JSON.parse(await file.text()));
-      setSessions(previous => {
-        const merged = new Map(previous.map(session => [session.id, session]));
-        imported.forEach(session => { if (!merged.has(session.id)) merged.set(session.id, session); });
-        return [...merged.values()].sort((a, b) => a.endedAt - b.endedAt);
-      });
-      notify('공부 기록을 복원했어요. 기존 기록도 함께 보관해요.');
+      const backup = JSON.parse(await file.text());
+      const imported = parseBackup(backup);
+      const importedTasks = parseBackupTasks(backup);
+      const merged = new Map([...readSessions(), ...sessions].map(session => [session.id, session]));
+      imported.forEach(session => { if (!merged.has(session.id)) merged.set(session.id, session); });
+      const next = [...merged.values()].sort((a, b) => a.endedAt - b.endedAt);
+      const mergedTasks = new Map([...readTasks(), ...tasksRef.current].map(task => [task.id, task]));
+      importedTasks.forEach(task => { if (!mergedTasks.has(task.id)) mergedTasks.set(task.id, task); });
+      const tasksSaved = saveTasks([...mergedTasks.values()].sort((a, b) => a.createdAt - b.createdAt));
+      const sessionsSaved = save('sessions', next); setSessions(next);
+      notify(tasksSaved && sessionsSaved ? '공부 기록과 할 일을 복원했어요. 기존 기록도 함께 보관해요.' : '복원 데이터를 이 화면에 보관했지만 기기 저장에 실패했어요. 내보내기로 보관해 주세요.');
     } catch { notify('올바른 costu 백업 파일인지 확인해 주세요. 최대 5MB까지 불러올 수 있어요.'); }
     if (importRef.current) importRef.current.value = '';
   }
@@ -202,7 +315,7 @@ export default function App() {
   function changePresence(status: Presence) {
     if (status === 'away' && timer.status === 'running') toggleTimer();
     else if (status === 'focusing' && timer.status !== 'running') toggleTimer();
-    else socketRef.current?.emit('presence:update', status);
+    else syncPresence();
   }
 
   return <div className="app-shell">
@@ -221,14 +334,19 @@ export default function App() {
       <header className="topbar"><div className="breadcrumb">나만의 작은 서재 <span>/</span> <strong>{{ focus: '집중 공간', records: '나의 기록', settings: '나의 설정' }[page]}</strong></div><div className="topbar-right"><span className="today-date">{new Date(now).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })}</span><span className="soft-badge"><Sun size={15}/> 좋은 하루예요</span></div></header>
       {storageError && <div className="warning" role="alert">기기 저장 공간을 사용할 수 없어 기록이 사라질 수 있어요. 나의 기록에서 내보내기를 해 주세요.</div>}
       <div className="page-content">
+        {!connected && <p className="connection-notice" role="status">서버에 연결 중이에요. 개인 타이머와 기기 기록은 계속 사용할 수 있어요.</p>}
+        {connected && !roomReady && !room && roomCodeRef.current && <div className="connection-notice" role="status">이전 서재에 다시 참여하는 중이에요. <button className="secondary" onClick={() => socketRef.current?.disconnect().connect()}>서재 다시 연결</button></div>}
+        {page !== 'focus' && timer.status !== 'idle' && <section className="ongoing-focus" aria-label="진행 중인 타이머"><div><strong>{resting ? '5분 휴식' : timer.subject || '자유 공부'}</strong><small>{resting ? '휴식' : '집중'} {timer.status === 'paused' ? '일시 정지' : '진행 중'} · {formatTime(remaining)} 남음</small></div><button className="secondary" onClick={returnToFocus}>타이머로 돌아가기<ArrowRight size={16}/></button></section>}
         {page === 'focus' && <>
           <section className="page-heading"><div><div className="eyebrow"><span/> A LITTLE FOCUS, TOGETHER</div><h1>각자의 공부, <span>함께하는 시간.</span></h1><p>혼자여도 괜찮아요. 함께라면 조금 더 힘이 나니까.</p></div><div className="heading-doodle"><Sprout size={43} strokeWidth={1.3}/><span>let’s grow, slowly</span></div></section>
           <div className="dashboard-grid">
             <section className="focus-card card">
-              <div className="focus-card-top"><div className="segmented" aria-label="공부 모드"><button className={tab === 'solo' ? 'active' : ''} onClick={() => setTab('solo')}><Leaf size={16}/>혼자 집중</button><button className={tab === 'together' ? 'active' : ''} onClick={() => setTab('together')}><Users size={16}/>함께 집중{room && <span className="count">{room.members.length}</span>}</button></div><span className="quiet-label"><span className={active ? 'status-dot pulse' : 'status-dot'}/>{active ? '집중 중이에요' : timer.status === 'paused' ? '잠시 쉬어가요' : '시작할 준비 완료'}</span></div>
-              <StudyScene avatar={profile.avatar} active={active}/>
-              <div className="timer-area"><button className="timer-subject" disabled={timer.status !== 'idle'} onClick={() => { document.getElementById('subject')?.focus(); }}><span className="tiny-leaf">✦</span> 나를 위한 집중 시간</button><div className="timer-display" role="timer" aria-label={`남은 시간 ${formatTime(remaining)}`}>{formatTime(remaining)}</div><div className="timer-track"><span style={{ width: `${(1 - remaining / timer.duration) * 100}%` }}/></div><label className="subject-label" htmlFor="subject">오늘은 무엇에 집중할까요?</label><input id="subject" className="subject-input" maxLength={50} value={timer.subject} disabled={timer.status !== 'idle'} onChange={e => setTimer(previous => ({ ...previous, subject: e.target.value }))} placeholder="오늘은 무엇에 집중할까요?" aria-label="공부 주제"/>
-                <div className="timer-actions"><button className="duration-button" disabled={timer.status !== 'idle'} onClick={() => { setDuration(timer.duration / 60); openDialog('duration'); }}><Clock3 size={17}/>{timer.duration / 60}분<Settings2 size={15}/></button><button className="primary start-button" onClick={toggleTimer}>{active ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor"/>}{active ? '잠시 쉬기' : timer.status === 'paused' ? '다시 집중하기' : '집중 시작하기'}</button>{timer.status !== 'idle' && <button className="stop-button" aria-label="집중 종료" onClick={() => openDialog('finish')}><Square size={17}/></button>}</div>
+              <div className="focus-card-top"><div className="segmented" aria-label="공부 모드"><button className={tab === 'solo' ? 'active' : ''} onClick={() => setTab('solo')}><Leaf size={16}/>혼자 집중</button><button className={tab === 'together' ? 'active' : ''} onClick={() => setTab('together')}><Users size={16}/>함께 집중{room && <span className="count">{room.members.length}</span>}</button></div><span className="quiet-label"><span className={active ? 'status-dot pulse' : 'status-dot'}/>{resting ? '5분 휴식 중이에요' : active ? '집중 중이에요' : timer.status === 'paused' ? '잠시 쉬어가요' : '시작할 준비 완료'}</span></div>
+              <StudyScene avatar={profile.avatar} active={active && !resting} motion={camera.motion}/>
+              <div className="timer-area">{resting ? <p className="break-label"><Coffee size={16}/>나를 위한 5분 휴식</p> : <button className="timer-subject" disabled={timer.status !== 'idle'} onClick={() => { document.getElementById('subject')?.focus(); }}><span className="tiny-leaf">✦</span> 나를 위한 집중 시간</button>}<div className="timer-display" role="timer" aria-label={`남은 시간 ${formatTime(remaining)}`}>{formatTime(remaining)}</div><div className="timer-track"><span style={{ width: `${(1 - remaining / timer.duration) * 100}%` }}/></div>{!resting && <><label className="subject-label" htmlFor="subject">오늘은 무엇에 집중할까요?</label><input id="subject" className="subject-input" maxLength={50} value={timer.subject} disabled={timer.status !== 'idle'} onChange={e => setTimer({ ...timerRef.current, subject: e.target.value })} placeholder="오늘은 무엇에 집중할까요?" aria-label="공부 주제"/></>}
+                <div className="timer-actions">{!resting && <button className="duration-button" disabled={timer.status !== 'idle'} onClick={() => { setDuration(timer.duration / 60); openDialog('duration'); }}><Clock3 size={17}/>{timer.duration / 60}분<Settings2 size={15}/></button>}<button className="primary start-button" onClick={toggleTimer}>{active ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor"/>}{resting ? active ? '휴식 일시 정지' : '휴식 계속하기' : active ? '잠시 쉬기' : timer.status === 'paused' ? '다시 집중하기' : '집중 시작하기'}</button>{timer.status !== 'idle' && <button className="stop-button" aria-label={resting ? '휴식 마치기' : '집중 종료'} onClick={() => resting ? finish() : openDialog('finish')}><Square size={17}/></button>}</div>
+                {resting && <p className="break-description">휴식은 공부 기록에 포함하지 않아요.<br/>마친 뒤 다음 집중은 직접 시작해 주세요.</p>}
+                {!resting && timer.status === 'idle' && timer.breakAvailable && <div className="break-offer"><p>집중한 만큼, 잠깐 쉬어가도 좋아요.</p><button className="secondary" onClick={startBreak}><Coffee size={17}/>5분 휴식 시작하기</button><button className="text-button" onClick={() => setTimer({ ...timerRef.current, breakAvailable: false })}>휴식 건너뛰기</button></div>}
               </div>
               <div className="focus-footer"><span><ShieldCheck size={15}/>얼굴 공개 없이, 편안하게</span><button className={sound ? 'sound-button on' : 'sound-button'} onClick={toggleSound} aria-pressed={sound}>{sound ? <Volume2 size={16}/> : <VolumeX size={16}/>}바람 소리<span className="toggle"><i/></span></button></div>
             </section>
@@ -237,8 +355,10 @@ export default function App() {
               <section className="invite-card"><div className="invite-illustration"><span><Avatar kind="cat" size={48}/></span><span><Avatar kind="bunny" size={48}/></span><Sparkles size={18}/></div><h2>가까운 친구와, 더 가볍게.</h2><p>약속도 카메라도 필요 없어요.<br/>링크 하나로 같은 서재에 앉아보세요.</p><button onClick={() => openDialog('create')}>우리만의 서재 만들기<ArrowRight size={17}/></button></section>
             </aside>
           </div>
+          <CameraAvatarPanel avatar={profile.avatar} motion={camera.motion} status={camera.status} error={camera.error} onStart={() => void camera.start()} onStop={() => camera.stop()}/>
+          <StudyPlan tasks={tasks.map(task => ({ ...task, ...taskProgress(task, sessions) }))} activeTaskId={timer.status !== 'idle' ? timer.taskId : undefined} canStart={timer.status === 'idle'} onAdd={addTask} onStart={startTask} onToggle={toggleTask} onDelete={deleteTask}/>
           <section className="together-section"><div className="section-heading"><div><h2>{room ? room.name : '함께라서 좋은 집중'} <span className="small-tag">초대형 서재</span></h2><p>{room ? '각자의 속도로 공부하고, 가볍게 응원을 건네세요.' : '아는 사람과 조용히 연결되는, 우리만의 공부 공간.'}</p></div>{room ? <button className="text-button" onClick={leaveRoom}><LogOut size={16}/>서재 나가기</button> : <button className="text-button" onClick={() => openDialog('join')}><Link size={16}/>초대 코드로 참여<ArrowRight size={15}/></button>}</div>
-            {room ? <div className="room-panel card"><div className="room-toolbar"><span className={connected ? 'room-connected' : 'room-offline'}><span className="status-dot"/>{connected ? `${room.members.length}명이 함께하고 있어요` : '연결이 끊겼어요. 다시 연결하는 중…'}</span><button className="invite-code" onClick={copyInvite} disabled={!connected}><span>{room.code}</span><Copy size={14}/>초대하기</button></div><div className="members">{room.members.map(member => <div className={`member ${member.status}`} key={member.id}><div className="member-avatar"><Avatar kind={member.avatar} size={73}/>{reactions[member.id] && now - reactions[member.id].at < 3000 && <span className="reaction-bubble">{reactions[member.id].emoji}</span>}</div><strong>{member.name}{member.id === selfId && <span>나</span>}</strong><small><i/>{member.online === false ? '재연결 중' : presenceLabel[member.status]}</small></div>)}{room.members.length < 6 && <button className="empty-seat" onClick={copyInvite} disabled={!connected}><span><Plus size={23}/></span><strong>친구의 자리</strong><small>초대 링크 보내기</small></button>}</div><div className="room-controls"><div className="status-controls"><button disabled={!connected} className={myStatus === 'focusing' ? 'selected' : ''} onClick={() => changePresence('focusing')}><BookOpen size={15}/>집중</button><button disabled={!connected} className={myStatus === 'away' ? 'selected' : ''} onClick={() => changePresence('away')}><Coffee size={15}/>자리 비움</button></div><div className="reactions" aria-label="친구에게 응원 보내기">{['👏', '🌱', '🔥', '☕'].map(emoji => <button key={emoji} aria-label={`${emoji} 리액션 보내기`} disabled={!connected} onClick={() => socketRef.current?.emit('reaction', emoji)}>{emoji}</button>)}</div></div></div> : <div className="room-empty card"><div className="room-empty-art"><Users size={27} strokeWidth={1.5}/></div><div><h3>{tab === 'together' ? '함께 앉을 서재를 골라볼까요?' : '혼자 시작해도, 언제든 함께할 수 있어요.'}</h3><p>친구를 초대하거나 받은 코드로 들어오세요. 최대 6명이 함께해요.</p></div><button className="secondary" onClick={() => openDialog('create')}><Plus size={17}/>서재 만들기</button></div>}
+            {room ? <div className="room-panel card"><div className="room-toolbar"><span className={roomReady ? 'room-connected' : 'room-offline'}><span className="status-dot"/>{roomReady ? `${room.members.length}명이 함께하고 있어요` : '서재를 다시 연결하는 중… 표시된 상태는 마지막 연결 기준이에요.'}</span>{!roomReady && <button className="secondary" onClick={() => { socketRef.current?.disconnect().connect(); }}>서재 다시 연결</button>}<button className="invite-code" onClick={shareInvite} disabled={!roomReady}><span>{room.code}</span><Share2 size={14}/>친구 초대</button><button className="text-button" onClick={copyInvite} disabled={!roomReady}><Copy size={14}/>링크 복사</button></div><div className="members">{room.members.map(member => <div className={`member ${member.status}`} key={member.id}><div className="member-avatar"><Avatar kind={member.avatar} size={73} motion={member.id === selfId ? camera.motion : roomReady && member.online !== false && remoteMotions[member.id] && now - remoteMotions[member.id].at < 1500 ? remoteMotions[member.id].motion : null}/>{reactions[member.id] && now - reactions[member.id].at < 3000 && <span className="reaction-bubble">{reactions[member.id].emoji}</span>}</div><strong>{member.name}{member.id === selfId && <span>나</span>}</strong><small><i/>{member.online === false ? '재연결 중' : presenceLabel[member.status]}</small></div>)}{room.members.length < 6 && <button className="empty-seat" onClick={shareInvite} disabled={!roomReady}><span><Plus size={23}/></span><strong>친구의 자리</strong><small>친구에게 초대 보내기</small></button>}</div><div className="room-controls"><div className="status-controls"><button disabled={!roomReady || resting} className={myStatus === 'focusing' ? 'selected' : ''} onClick={() => changePresence('focusing')}><BookOpen size={15}/>집중</button><button disabled={!roomReady} className={myStatus === 'away' ? 'selected' : ''} onClick={() => changePresence('away')}><Coffee size={15}/>자리 비움</button></div><div className="reactions" aria-label="친구에게 응원 보내기">{['👏', '🌱', '🔥', '☕'].map(emoji => <button key={emoji} aria-label={`${emoji} 리액션 보내기`} disabled={!roomReady} onClick={() => { if (roomReadyRef.current) socketRef.current?.volatile.emit('reaction', emoji); }}>{emoji}</button>)}</div></div></div> : <div className="room-empty card"><div className="room-empty-art"><Users size={27} strokeWidth={1.5}/></div><div><h3>{tab === 'together' ? '함께 앉을 서재를 골라볼까요?' : '혼자 시작해도, 언제든 함께할 수 있어요.'}</h3><p>친구를 초대하거나 받은 코드로 들어오세요. 최대 6명이 함께해요.</p></div><button className="secondary" onClick={() => openDialog('create')}><Plus size={17}/>서재 만들기</button></div>}
           </section>
           <footer className="page-footer"><span><Leaf size={14}/>경쟁보다 동행, 완벽보다 꾸준함.</span><span>MADE FOR YOUR OWN PACE</span></footer>
         </>}
@@ -251,7 +371,7 @@ export default function App() {
         {page === 'settings' && <>
           <section className="page-heading"><div><div className="eyebrow"><span/> MAKE YOURSELF AT HOME</div><h1>나에게 편안한 <span>작은 공간.</span></h1><p>어떤 모습이든 좋아요. 나다운 집중을 준비해요.</p></div></section>
           <form className="card settings-card" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); const name = String(data.get('name') ?? '').trim(); const goal = Number(data.get('goal')); if (!name || name.length > 16 || !Number.isInteger(goal) || goal < 15 || goal > 720) return; setProfile(previous => ({ ...previous, name, goal })); notify(room ? '설정을 저장했어요. 닉네임과 아바타는 다음 서재 입장부터 반영돼요.' : '나의 설정을 저장했어요.'); }}><h2>나의 프로필</h2><label className="field-label">함께 공부할 나의 모습</label><div className="avatar-options">{avatars.map(kind => <button type="button" aria-label={`${{ cat: '고양이', bunny: '토끼', bear: '곰', frog: '개구리' }[kind]} 아바타 선택`} aria-pressed={profile.avatar === kind} className={profile.avatar === kind ? 'chosen' : ''} key={kind} onClick={() => setProfile(previous => ({ ...previous, avatar: kind }))}><Avatar kind={kind} size={72}/>{profile.avatar === kind && <i><Check size={12}/></i>}</button>)}</div><label className="field-label" htmlFor="nickname">닉네임</label><input id="nickname" name="name" key={profile.name} defaultValue={profile.name} minLength={1} maxLength={16} required/><p className="field-hint">친구들에게 보여줄 이름이에요. 최대 16자.</p><label className="field-label" htmlFor="daily-goal">하루 집중 목표</label><div className="input-unit"><input id="daily-goal" name="goal" type="number" min={15} max={720} step={1} defaultValue={profile.goal} required/><span>분</span></div><p className="field-hint">15분부터 720분까지. 부담 없는 목표로 시작해 보세요.</p><button className="primary" type="submit"><Check size={17}/>설정 저장하기</button></form>
-          <section className="card privacy-card"><ShieldCheck size={24}/><div><h2>편안하게 집중할 권리</h2><p>현재 버전은 카메라와 마이크 권한을 요청하지 않아요. 얼굴이나 음성을 수집하지 않으며, 공부 상태는 직접 선택해요. 서재가 비면 참가 정보도 서버에서 사라져요.</p><p>로그인 없이 사용하는 초기 버전이에요. 다른 기기 간 기록 동기화는 아직 지원하지 않아요.</p></div></section>
+          <section className="card privacy-card"><ShieldCheck size={24}/><div><h2>편안하게 집중할 권리</h2><p>표정 연결을 켤 때만 카메라 권한을 요청해요. 영상은 이 기기에서 처리하고 저장하거나 전송하지 않아요. 같은 서재에는 아바타 움직임 수치만 공유하며, 마이크는 사용하지 않아요. 공부 상태는 직접 선택해요. 서재가 비면 참가 정보도 서버에서 사라져요.</p><p>로그인 없이 사용하는 초기 버전이에요. 다른 기기 간 기록 동기화는 아직 지원하지 않아요.</p></div></section>
         </>}
       </div>
     </main>
